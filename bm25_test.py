@@ -4,16 +4,39 @@ Created on Sat Nov 20 11:59:55 2021
 
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
+import os.path
 
 from pyserini.search import SimpleSearcher
 from pyserini.index import IndexReader
+from dataclasses import dataclass
 from document import Document
 from tqdm import tqdm
 import re
 
 
+@dataclass
+class Params:
+    input_file: str = "./background_linking.txt"
+    index_loc: str = "./indexes/wapo"
+
+    rm: str = "bm25"        # "bm25" or "rm3"
+    algorithm: str = "kC"   # "kC" or "kT"
+    query_size: int = 100
+
+    use_mega_query: bool = True
+    init_query_size: int = 100
+    mega_query_size: int = 100
+    n_docs: int = 10
+
+    output_dir: str = "./results"
+    output_file: str = f"{rm}_{algorithm}_qsize={query_size}{'_mega' if use_mega_query else ''}.results"
+
+
+params = Params()
+
+
 def make_topic_dict():
-    with open('./background_linking.txt') as f:
+    with open(params.input_file) as f:
         topics = f.readlines()
 
     nums = []
@@ -32,21 +55,27 @@ def make_topic_dict():
     topic_dict = {nums[i]: ids[i] for i in range(len(nums))}
     return topic_dict
 
-# =========================== Pipeline ===========================
 
+# =========================== Pipeline ===========================
 # make the topic dictionary with keys being topic number and value being document id
 topics = make_topic_dict()
 
 # create the searcher for the index
-searcher = SimpleSearcher('./indexes/wapo')
-searcher.set_bm25()
+searcher = SimpleSearcher(params.index_loc)
+{
+    "bm25": searcher.set_bm25,
+    "rm3": searcher.set_rm3
+}[params.rm]()
+
 # create index reader
-index_reader = IndexReader("./indexes/wapo")
+index_reader = IndexReader(params.index_loc)
 
 tokenized_texts = {}
 
 # open the output file
-out_file = open("topic_rels.txt", "w")
+if not os.path.isdir(params.output_dir):
+    os.mkdir(params.output_dir)
+out_file = open(os.path.join(params.output_dir, params.output_file), "w")
 
 # loop through the topic numbers
 for topic_number in tqdm(topics):
@@ -54,9 +83,9 @@ for topic_number in tqdm(topics):
     document_id = topics[topic_number]
 
     # making a query for this document:
-    doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id, tokenized_texts=tokenized_texts)
-    # query = doc.get_query(query_size=100, algorithm="kT")
-    query = doc.get_mega_query(mega_query_size=10, init_query_size=10, n_docs=2)
+    doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
+                   tokenized_texts=tokenized_texts)
+    query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
 
     # searching for relevant documents using BM25
     hits = searcher.search(query, k=101)

@@ -7,7 +7,6 @@ import itertools
 import logging
 import json
 import nltk
-import sys
 import re
 
 nltk.download('stopwords')
@@ -17,8 +16,7 @@ stop_words = set(stopwords.words('english'))
 logging.basicConfig(
     level=logging.INFO,
     handlers=[
-        logging.FileHandler("debug.log"),
-        logging.StreamHandler(sys.stderr)
+        logging.FileHandler("debug.log")
     ]
 )
 
@@ -42,7 +40,7 @@ class Document:
         raw = doc.raw()
         content = json.loads(raw)
         text = "\n".join(
-            [line['content'] for line in content['contents'] if line['type'] in ['sanitized_html', 'title']])
+            [line['content'] for line in content['contents'] if line and line['type'] in ['sanitized_html', 'title'] and line['content']])
         text = re.sub("(<a href=\".*?\">|</a>)", "", text)
         return text
 
@@ -50,7 +48,7 @@ class Document:
         if doc_id in self.tokenized_texts:
             return self.tokenized_texts[doc_id]
         text = self.get_text(doc_id)
-        tokens = re.sub("\\W ", " ", text.lower())
+        tokens = re.sub("[^a-zA-Z0-9\-]", " ", text.lower())
         tokens = [w for w in word_tokenize(tokens) if w not in stop_words]
         self.tokenized_texts[doc_id] = tokens
         return tokens
@@ -120,15 +118,15 @@ class Document:
             "kT": kT_ranked
         }
 
-    def get_query(self, query_size: int = 10, algorithm: str = "kC") -> str:
+    def get_query(self, params) -> str:
         logging.info(f"Getting query for {self.doc_id}...")
         query = " ".join(
-            [w[0] for w in self.ranking[algorithm][:query_size]])
+            [w[0] for w in self.ranking[params.algorithm][:params.query_size]])
         return query
 
-    def get_mega_query(self, mega_query_size: int = 10, init_query_size: int = 10, n_docs: int = 10, algorithm: str = "kC") -> str:
+    def get_mega_query(self, params) -> str:
         logging.info(f"Getting mega query for {self.doc_id}...")
-        hits = self.simple_searcher.search(self.get_query(init_query_size), k=n_docs)
+        hits = self.simple_searcher.search(self.get_query(params), k=params.n_docs)
         logging.info(f"{len(hits)} hits!")
         tokens = []
         for hit in hits:
@@ -136,4 +134,4 @@ class Document:
         logging.info(f"{len(tokens)} tokens found!")
         ranking = self.kCT_from_tokens(tokens, self.window_size)
 
-        return " ".join([w for w, c in ranking[algorithm][:mega_query_size]])
+        return " ".join([w for w, c in ranking[params.algorithm][:params.mega_query_size]])
