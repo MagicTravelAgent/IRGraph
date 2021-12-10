@@ -5,50 +5,76 @@ Created on Sat Nov 20 11:59:55 2021
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
 
-import pyserini
-from pyserini.index import IndexReader
 from pyserini.search import SimpleSearcher
-import numpy as np
-import faiss
-import json
+from pyserini.index import IndexReader
+from document import Document
+from tqdm import tqdm
+import re
 
 
-index_reader = IndexReader("./indexes/wapo")
+def make_topic_dict():
+    with open('./background_linking.txt') as f:
+        topics = f.readlines()
+
+    nums = []
+    ids = []
+
+    for x in topics:
+        num_search = re.search('<num> Number: (.*) </num>', x, re.IGNORECASE)
+        id_search = re.search('<docid>(.*)</docid>', x, re.IGNORECASE)
+        if num_search:
+            num = num_search.group(1)
+            nums.append(num)
+        if id_search:
+            id = id_search.group(1)
+            ids.append(id)
+
+    topic_dict = {nums[i]: ids[i] for i in range(len(nums))}
+    return topic_dict
+
+# =========================== Pipeline ===========================
+
+# make the topic dictionary with keys being topic number and value being document id
+topics = make_topic_dict()
+
+# create the searcher for the index
 searcher = SimpleSearcher('./indexes/wapo')
+searcher.set_bm25()
+# create index reader
+index_reader = IndexReader("./indexes/wapo")
 
-# document we use is 95195e84-32fe-11e1-825f-dabc29fd7071
-doc = searcher.doc('95195e84-32fe-11e1-825f-dabc29fd7071')
-raw = doc.raw()
-content = json.loads(raw)
-text = "\n".join([line['content'] for line in content['contents'] if line['type'] in ['sanitized_html', 'title']])
+tokenized_texts = {}
 
-# all of these can be retrieved using the index reader
-N = index_reader.stats()['documents']
-tf = index_reader.get_document_vector('95195e84-32fe-11e1-825f-dabc29fd7071')
-df = {term: (index_reader.get_term_counts(term, analyzer=None))[0] for term in tf.keys()}
+# open the output file
+out_file = open("topic_rels.txt", "w")
 
-# building the idf from these components
-# idf = log((1 + N) / number of documents where the term appears)
-idf = {term: np.log((N + 1)/df[term]) for term in tf.keys()}
-tf_idf = {term: tf[term]*idf[term] for term in tf.keys()}
+# loop through the topic numbers
+for topic_number in tqdm(topics):
+    # getting the document ID for the topic number
+    document_id = topics[topic_number]
 
-top_100 = np.array(sorted([[idf, term] for term, idf in tf_idf.items()], reverse=True)[:100])
-# query builder
-# see if the query builder thing with the score might improve getting documents, but probably wont because they are weighted later
-# using edge strength for re-weighting might be better but that is for after the graph is made
-query = ' '.join(top_100[:,1])
-print(query)
+    # making a query for this document:
+    doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id, tokenized_texts=tokenized_texts)
+    # query = doc.get_query(query_size=100, algorithm="kT")
+    query = doc.get_mega_query(mega_query_size=10, init_query_size=10, n_docs=2)
 
-# test search with the query?
-print("resuts")
+    # searching for relevant documents using BM25
+    hits = searcher.search(query, k=101)
 
-hits = searcher.search(query)
-for i in range(len(hits)):
-    print(f'{i+1:2} {hits[i].docid:4} {hits[i].score:.5f}')
-    # print(hits[i].raw)
+    # removing the initial document from the retrieved documents and adding the rest to the output list with their score
+    return_docs = []
+    for i in range(len(hits)):
+        if hits[i].docid != document_id:
+            return_docs.append([hits[i].docid, hits[i].score])
 
-# manually remove the document you are searching for because this is done in anserini
-# baseline is running this write the topic then use trec eval. alos use rm3 as well as bm25 for the baseline
-# searcher.set_rm3() for rm3 reweighting
-# rm3 does ~~ bm25 -> top 10 doc look at term distribution -> depending on prob of words occuring added to query and weighted
-# compare
+    # creating the output 2d array:
+    output = []
+    for i in range(len(return_docs)):
+        output.append([topic_number, "Q0", return_docs[i][0], i, return_docs[i][1], "TEAM2"])
+
+    # writing to a file
+    for item in output:
+        out_file.write(' '.join(map(str, item)) + "\n")
+
+# closing the output file
+out_file.close()
