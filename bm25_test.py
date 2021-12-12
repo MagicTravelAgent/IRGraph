@@ -14,6 +14,7 @@ from pyserini.search.querybuilder import JTermQuery, JTerm
 from document import Document
 from tqdm import tqdm
 import itertools
+import json
 import os
 import re
 
@@ -35,15 +36,20 @@ class Params:
     mega_query_size: int = 100
     n_docs: int = 10
 
+    use_relative_query_size = True
+    rel_q_size = 0.2    # between 0 and 1
+    min_q_size = 70
+
     query_boosting: bool = False
 
     output_dir: str = "./results"
 
     def set_output(self):
-        self.output_file: str = f"{self.rm}_{self.algorithm}_qsize={self.query_size}"\
-                f"{f'_winsize={self.window_size}' if not self.use_tf_idf else ''}"\
-                f"{'_mega' if self.use_mega_query else ''}{'_tf-idf' if self.use_tf_idf else ''}"\
-                f"{'_boosted' if self.query_boosting else ''}.results"
+        self.output_file: str = f"{self.rm}_{self.algorithm}"\
+            f"_qsize={'relative-'+str(self.rel_q_size*100)+'%' if self.use_relative_query_size else self.query_size}"\
+            f"{f'_winsize={self.window_size}' if not self.use_tf_idf else ''}"\
+            f"{'_mega' if self.use_mega_query else ''}{'_tf-idf' if self.use_tf_idf else ''}"\
+            f"{'_boosted' if self.query_boosting else ''}.results"
 
 
 def make_topic_dict():
@@ -65,6 +71,21 @@ def make_topic_dict():
 
     topic_dict = {nums[i]: ids[i] for i in range(len(nums))}
     return topic_dict
+
+
+def filter_hits(hits, document_id, searcher):
+    # removing initial document from the retrieved documents and adding the rest to the output list with their score
+    return_docs = []
+    #for i in range(len(hits)):
+    #    if hits[i].docid != document_id:
+    #        return_docs.append([hits[i].docid, hits[i].score])
+    seen_docs = set()
+    for hit in hits:
+        doc = json.loads(searcher.doc(hit.docid).raw())
+        if hit.docid != document_id and (doc['author'], doc['title']) not in seen_docs:
+            return_docs.append([hit.docid, hit.score])
+            seen_docs.add((doc['author'], doc['title']))
+    return return_docs
 
 
 def run(params: Params, topics: dict, pbar: tqdm):
@@ -114,13 +135,10 @@ def run(params: Params, topics: dict, pbar: tqdm):
             query = query_terms
 
         # searching for relevant documents using the SimpleSearcher
-        hits = searcher.search(query, k=101)
+        hits = searcher.search(query, k=150)
 
-        # removing initial document from the retrieved documents and adding the rest to the output list with their score
-        return_docs = []
-        for i in range(len(hits)):
-            if hits[i].docid != document_id:
-                return_docs.append([hits[i].docid, hits[i].score])
+        # clean results (filter out duplicates and original document)
+        return_docs = filter_hits(hits, document_id, searcher)[:100]
 
         # creating the output 2d array:
         output = []

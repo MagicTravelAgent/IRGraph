@@ -123,10 +123,10 @@ class Document:
         logging.info(f"Getting query for {self.doc_id}...")
         if params.use_tf_idf:
             return self.get_query_tf_idf(params)
-
+        query_size = max(70, int(params.rel_q_size*len(self.ranking[params.algorithm]))) if params.use_relative_query_size else params.query_size
         query = " ".join(
-            [w[0] for w in self.ranking[params.algorithm][:params.query_size]])
-        return query, self.ranking[params.algorithm][:params.query_size]
+            [w[0] for w in self.ranking[params.algorithm][:query_size]])
+        return query, self.ranking[params.algorithm][:query_size]
 
     def get_query_tf_idf(self, params) -> str:
         # all of these can be retrieved using the index reader
