@@ -107,3 +107,8 @@ for topic_number in tqdm(topics):
 
 # closing the output file
 out_file.close()
+
+# Analyze results and write to result file:
+out_file_name = os.path.join(params.output_dir, params.output_file)
+os.system(f"RESULTFILE={out_file_name} && echo $RESULTFILE >> all_results.txt")
+os.system(f"RESULTFILE={out_file_name} && python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt $RESULTFILE | tail -6 >> all_results.txt")
