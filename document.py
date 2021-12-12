@@ -120,13 +120,13 @@ class Document:
         # Sort nodes (tokens) by score, descending:
         kC_ranked = sorted(kC_scores_neighbours.items(), key=lambda item: item[1], reverse=True)
         kT_ranked = sorted(kT_scores_neighbours.items(), key=lambda item: item[1], reverse=True)
-
+        logger.info(f"Generated ranking")
         return {
             "kC": kC_ranked,
             "kT": kT_ranked
         }
 
-    def get_query(self, params) -> (str, (str, int)):
+    def get_query(self, params) -> (str, list):
         logger.info(f"Getting query for {self.doc_id}...")
         if params.use_tf_idf:
             logger.info("Using tf-idf for query")
@@ -157,9 +157,10 @@ class Document:
 
         return query
 
-    def get_mega_query(self, params) -> str:
+    def get_mega_query(self, params) -> (str, list):
         logger.info(f"Getting mega query for {self.doc_id}...")
-        hits = self.simple_searcher.search(self.get_query(params), k=params.n_docs)
+        q, qw = self.get_query(params)
+        hits = self.simple_searcher.search(q, k=params.n_docs)
         logger.info(f"{len(hits)} hits!")
         tokens = []
         for hit in hits:
@@ -167,4 +168,5 @@ class Document:
         logger.info(f"{len(tokens)} tokens found!")
         ranking = self.kCT_from_tokens(tokens, self.window_size)
 
-        return " ".join([w for w, c in ranking[params.algorithm][:params.mega_query_size]])
+        return " ".join([w for w, c in ranking[params.algorithm][:params.mega_query_size]]), \
+               ranking[params.algorithm][:params.mega_query_size]

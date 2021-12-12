@@ -4,7 +4,7 @@ Created on Sat Nov 20 11:59:55 2021
 
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
-
+import pyserini.search
 from pyserini.search.querybuilder import JTermQuery, JTerm
 from pyserini.search import SimpleSearcher, querybuilder
 from pyserini.index import IndexReader
@@ -36,7 +36,7 @@ class Params:
     query_size: int = 100
     window_size: int = 4
 
-    use_mega_query: bool = False
+    use_mega_query: bool = True
     init_query_size: int = 100
     mega_query_size: int = 100
     n_docs: int = 10
@@ -45,7 +45,7 @@ class Params:
     rel_q_size = 0.2    # between 0 and 1
     min_q_size = 70
 
-    query_boosting: bool = False
+    query_boosting: bool = True
 
     output_dir: str = "./results"
 
@@ -58,7 +58,7 @@ class Params:
 
 
 # make the topic dictionary with keys being topic number and value being document id
-def make_topic_dict():
+def make_topic_dict() -> dict:
     with open(INPUT_FILE) as f:
         topics = f.readlines()
 
@@ -79,7 +79,7 @@ def make_topic_dict():
     return topic_dict
 
 
-def filter_hits(hits, document_id, searcher):
+def filter_hits(hits: list, document_id: str, searcher: SimpleSearcher) -> list:
     # removing initial document from the retrieved documents and adding the rest to the output list with their score
     return_docs = []
     #for i in range(len(hits)):
@@ -186,9 +186,9 @@ def generate_params() -> list:
     params = [
         ["bm25", "rm3"],
         ["kC", "kT"],
-        [50, 100],
+        [50],
         [2, 4, 8],
-        [False]
+        [True]
     ]
 
     params_list = []
