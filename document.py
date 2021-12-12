@@ -14,12 +14,11 @@ nltk.download('stopwords')
 nltk.download('punkt')
 stop_words = set(stopwords.words('english'))
 
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("debug.log")
-    ]
-)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+file_handler = logging.FileHandler('document.log')
+file_handler.setFormatter(logging.Formatter('%(levelname)s:%(name)s:%(message)s'))
+logger.addHandler(file_handler)
 
 
 class Document:
@@ -31,12 +30,16 @@ class Document:
         self.tokenized_texts = tokenized_texts
 
         if self.doc_id not in self.tokenized_texts:
+            logger.info(f"Adding document {self.doc_id} to tokenized texts dictionary.")
             self.doc_tokens = self.tokenize_text(self.doc_id)
             self.tokenized_texts[self.doc_id] = self.doc_tokens
 
         self.ranking = self.kCT_from_tokens(self.doc_tokens, window_size=self.window_size)
+        logger.debug(f"Calculated kC: {self.ranking['kC']}")
+        logger.debug(f"Calculated kT: {self.ranking['kT']}")
 
     def get_text(self, doc_id: str) -> str:
+        logger.info(f"Retrieving text of document {doc_id}")
         doc = self.simple_searcher.doc(doc_id)
         raw = doc.raw()
         content = json.loads(raw)
@@ -45,17 +48,21 @@ class Document:
         text = re.sub("(<a href=\".*?\">|</a>)", "", text)
         return text
 
-    def tokenize_text(self, doc_id: str) -> list:  # TODO: remove punctuation
+    def tokenize_text(self, doc_id: str) -> list:
         if doc_id in self.tokenized_texts:
+            logger.info(f"Document {doc_id} already tokenized, returning saved tokens")
             return self.tokenized_texts[doc_id]
+
+        logger.info(f"Tokenizing document {doc_id}")
         text = self.get_text(doc_id)
         tokens = re.sub("[^a-zA-Z0-9\-]", " ", text.lower())
         tokens = [w for w in word_tokenize(tokens) if w not in stop_words]
         self.tokenized_texts[doc_id] = tokens
+        logger.debug(f"Calculated tokens for document {doc_id}: {tokens}")
         return tokens
 
     @staticmethod
-    def kCT_from_tokens(tokenized_text: list, window_size: int = 2) -> (list, list):
+    def kCT_from_tokens(tokenized_text: list, window_size: int = 2) -> (list, list):  # TODO: Add logging (using logger object)
         # Create co-occurrence graph:
         G = nx.Graph()
 
@@ -120,10 +127,16 @@ class Document:
         }
 
     def get_query(self, params) -> (str, (str, int)):
-        logging.info(f"Getting query for {self.doc_id}...")
+        logger.info(f"Getting query for {self.doc_id}...")
         if params.use_tf_idf:
+            logger.info("Using tf-idf for query")
             return self.get_query_tf_idf(params)
-        query_size = max(70, int(params.rel_q_size*len(self.ranking[params.algorithm]))) if params.use_relative_query_size else params.query_size
+
+        query_size = max(70, int(params.rel_q_size*len(self.ranking[params.algorithm])))\
+            if params.use_relative_query_size else params.query_size
+
+        logger.info("Using graph algorithm for query")
+
         query = " ".join(
             [w[0] for w in self.ranking[params.algorithm][:query_size]])
         return query, self.ranking[params.algorithm][:query_size]
@@ -145,13 +158,13 @@ class Document:
         return query
 
     def get_mega_query(self, params) -> str:
-        logging.info(f"Getting mega query for {self.doc_id}...")
+        logger.info(f"Getting mega query for {self.doc_id}...")
         hits = self.simple_searcher.search(self.get_query(params), k=params.n_docs)
-        logging.info(f"{len(hits)} hits!")
+        logger.info(f"{len(hits)} hits!")
         tokens = []
         for hit in hits:
             tokens.extend(self.tokenize_text(hit.docid))
-        logging.info(f"{len(tokens)} tokens found!")
+        logger.info(f"{len(tokens)} tokens found!")
         ranking = self.kCT_from_tokens(tokens, self.window_size)
 
         return " ".join([w for w, c in ranking[params.algorithm][:params.mega_query_size]])
