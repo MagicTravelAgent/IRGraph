@@ -118,11 +118,11 @@ class Document:
             "kT": kT_ranked
         }
 
-    def get_query(self, params) -> str:
+    def get_query(self, params) -> (str, (str, int)):
         logging.info(f"Getting query for {self.doc_id}...")
         query = " ".join(
-            [w[0] for w in self.ranking[params.algorithm][:params.query_size]])
-        return query
+            [w[0] for w in self.ranking[params.algorithm][:params.query_size]])  # was w[0]
+        return query, self.ranking[params.algorithm][:params.query_size]
 
     def get_mega_query(self, params) -> str:
         logging.info(f"Getting mega query for {self.doc_id}...")

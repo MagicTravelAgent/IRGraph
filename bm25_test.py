@@ -6,7 +6,9 @@ Created on Sat Nov 20 11:59:55 2021
 """
 import os.path
 
+from pyserini.search.querybuilder import JTermQuery, JTerm
 from pyserini.search import SimpleSearcher
+from pyserini.search import querybuilder
 from pyserini.index import IndexReader
 from dataclasses import dataclass
 from document import Document
@@ -23,7 +25,7 @@ class Params:
     algorithm: str = "kC"   # "kC" or "kT"
     query_size: int = 100
 
-    use_mega_query: bool = True
+    use_mega_query: bool = False
     init_query_size: int = 100
     mega_query_size: int = 100
     n_docs: int = 10
@@ -85,7 +87,18 @@ for topic_number in tqdm(topics):
     # making a query for this document:
     doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
                    tokenized_texts=tokenized_texts)
-    query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+    query_terms, weights = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+
+    should = querybuilder.JBooleanClauseOccur['should'].value
+    boolean_query_builder = querybuilder.get_boolean_query_builder()
+
+    terms = [JTermQuery(JTerm("contents", weighted_term[0])) for weighted_term in weights]
+    boosts = [querybuilder.get_boost_query(terms[i], float(weight[1])) for i, weight in enumerate(weights)]
+
+    for boost in boosts:
+        boolean_query_builder.add(boost, should)
+    query = boolean_query_builder.build()
+
 
     # searching for relevant documents using BM25
     hits = searcher.search(query, k=101)
