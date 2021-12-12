@@ -4,27 +4,28 @@ Created on Sat Nov 20 11:59:55 2021
 
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
-import os.path
 
 from pyserini.search import SimpleSearcher
 from pyserini.index import IndexReader
 from dataclasses import dataclass
 from document import Document
 from tqdm import tqdm
+import itertools
+import os
 import re
+
+INPUT_FILE: str = "./background_linking.txt"
+INDEX_LOC: str = "./indexes/wapo"
 
 
 @dataclass
 class Params:
-    input_file: str = "./background_linking.txt"
-    index_loc: str = "./indexes/wapo"
-
     use_tf_idf: bool = False  # Use tf-idf for the initial query
 
     rm: str = "bm25"        # "bm25" or "rm3"
     algorithm: str = "kT"   # "kC" or "kT"
     query_size: int = 100
-    window_size: int = 3
+    window_size: int = 4
 
     use_mega_query: bool = False
     init_query_size: int = 100
@@ -32,14 +33,13 @@ class Params:
     n_docs: int = 10
 
     output_dir: str = "./results"
-    output_file: str = f"{rm}_{algorithm}_qsize={query_size}{f'_winsize={window_size}' if not use_tf_idf else ''}{'_mega' if use_mega_query else ''}{'_tf-idf' if use_tf_idf else ''}.results"
 
-
-params = Params()
+    def set_output(self):
+        self.output_file: str = f"{self.rm}_{self.algorithm}_qsize={self.query_size}{f'_winsize={self.window_size}' if not self.use_tf_idf else ''}{'_mega' if self.use_mega_query else ''}{'_tf-idf' if self.use_tf_idf else ''}.results"
 
 
 def make_topic_dict():
-    with open(params.input_file) as f:
+    with open(INPUT_FILE) as f:
         topics = f.readlines()
 
     nums = []
@@ -59,59 +59,100 @@ def make_topic_dict():
     return topic_dict
 
 
-# =========================== Pipeline ===========================
-# make the topic dictionary with keys being topic number and value being document id
-topics = make_topic_dict()
+def run(params: Params, topics: dict, pbar: tqdm):
+    # =========================== Pipeline ===========================
+    # make the topic dictionary with keys being topic number and value being document id
 
-# create the searcher for the index
-searcher = SimpleSearcher(params.index_loc)
-{
-    "bm25": searcher.set_bm25,
-    "rm3": searcher.set_rm3
-}[params.rm]()
+    # create the searcher for the index
+    searcher = SimpleSearcher(INDEX_LOC)
+    {
+        "bm25": searcher.set_bm25,
+        "rm3": searcher.set_rm3
+    }[params.rm]()
 
-# create index reader
-index_reader = IndexReader(params.index_loc)
+    # create index reader
+    index_reader = IndexReader(INDEX_LOC)
 
-tokenized_texts = {}
+    tokenized_texts = {}
 
-# open the output file
-if not os.path.isdir(params.output_dir):
-    os.mkdir(params.output_dir)
-out_file = open(os.path.join(params.output_dir, params.output_file), "w")
+    # open the output file
+    if not os.path.isdir(params.output_dir):
+        os.mkdir(params.output_dir)
+    out_file = open(os.path.join(params.output_dir, params.output_file), "w")
 
-# loop through the topic numbers
-for topic_number in tqdm(topics):
-    # getting the document ID for the topic number
-    document_id = topics[topic_number]
+    # loop through the topic numbers
+    for topic_number in topics:
+        # getting the document ID for the topic number
+        document_id = topics[topic_number]
 
-    # making a query for this document:
-    doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
-                   tokenized_texts=tokenized_texts, window_size=params.window_size)
-    query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+        # making a query for this document:
+        doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
+                       tokenized_texts=tokenized_texts, window_size=params.window_size)
+        query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
 
-    # searching for relevant documents using the SimpleSearcher
-    hits = searcher.search(query, k=101)
+        # searching for relevant documents using the SimpleSearcher
+        hits = searcher.search(query, k=101)
 
-    # removing the initial document from the retrieved documents and adding the rest to the output list with their score
-    return_docs = []
-    for i in range(len(hits)):
-        if hits[i].docid != document_id:
-            return_docs.append([hits[i].docid, hits[i].score])
+        # removing the initial document from the retrieved documents and adding the rest to the output list with their score
+        return_docs = []
+        for i in range(len(hits)):
+            if hits[i].docid != document_id:
+                return_docs.append([hits[i].docid, hits[i].score])
 
-    # creating the output 2d array:
-    output = []
-    for i in range(len(return_docs)):
-        output.append([topic_number, "Q0", return_docs[i][0], i, return_docs[i][1], "TEAM2"])
+        # creating the output 2d array:
+        output = []
+        for i in range(len(return_docs)):
+            output.append([topic_number, "Q0", return_docs[i][0], i, return_docs[i][1], "TEAM2"])
 
-    # writing to a file
-    for item in output:
-        out_file.write(' '.join(map(str, item)) + "\n")
+        # writing to a file
+        for item in output:
+            out_file.write(' '.join(map(str, item)) + "\n")
 
-# closing the output file
-out_file.close()
+        pbar.update(1)
 
-# Analyze results and write to result file:
-out_file_name = os.path.join(params.output_dir, params.output_file)
-os.system(f"RESULTFILE={out_file_name} && echo $RESULTFILE >> all_results.txt")
-os.system(f"RESULTFILE={out_file_name} && python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt $RESULTFILE | tail -6 >> all_results.txt")
+    # closing the output file
+    out_file.close()
+
+    # Analyze results and write to result file:
+    out_file_name = os.path.join(params.output_dir, params.output_file)
+    os.system(f"RESULTFILE={out_file_name} && echo $RESULTFILE >> {params.output_dir}/all_results.txt")
+    os.system(f"RESULTFILE={out_file_name} && python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt $RESULTFILE | tail -6 >> {params.output_dir}/all_results.txt")
+
+
+def generate_params() -> list:
+    params = [
+        ["bm25", "rm3"],
+        ["kC", "kT"],
+        [50, 100],
+        [2, 4, 8],
+        [False]
+    ]
+
+    params_list = []
+    for p in itertools.product(*params):
+        rm, algorithm, query_size, window_size, use_mega_query = p
+        params_list.append(Params(
+            rm=rm,
+            algorithm=algorithm,
+            query_size=query_size,
+            window_size=window_size,
+            use_mega_query=use_mega_query
+        ))
+        params_list[-1].set_output()
+
+    return params_list
+
+
+def main():
+    topics = make_topic_dict()
+    params = generate_params()
+
+    for i, p in enumerate(params):
+        pbar = tqdm(total=len(topics))
+        pbar.set_description(f"Parameters {i+1}/{len(params)}")
+        run(p, topics, pbar)
+        pbar.close()
+
+
+if __name__ == '__main__':
+    main()
