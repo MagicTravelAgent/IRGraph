@@ -5,9 +5,12 @@ Created on Sat Nov 20 11:59:55 2021
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
 
-from pyserini.search import SimpleSearcher
+from pyserini.search import SimpleSearcher, querybuilder
 from pyserini.index import IndexReader
 from dataclasses import dataclass
+
+from pyserini.search.querybuilder import JTermQuery, JTerm
+
 from document import Document
 from tqdm import tqdm
 import itertools
@@ -32,10 +35,15 @@ class Params:
     mega_query_size: int = 100
     n_docs: int = 10
 
+    query_boosting: bool = False
+
     output_dir: str = "./results"
 
     def set_output(self):
-        self.output_file: str = f"{self.rm}_{self.algorithm}_qsize={self.query_size}{f'_winsize={self.window_size}' if not self.use_tf_idf else ''}{'_mega' if self.use_mega_query else ''}{'_tf-idf' if self.use_tf_idf else ''}.results"
+        self.output_file: str = f"{self.rm}_{self.algorithm}_qsize={self.query_size}"\
+                f"{f'_winsize={self.window_size}' if not self.use_tf_idf else ''}"\
+                f"{'_mega' if self.use_mega_query else ''}{'_tf-idf' if self.use_tf_idf else ''}"\
+                f"{'_boosted' if self.query_boosting else ''}.results"
 
 
 def make_topic_dict():
@@ -88,12 +96,27 @@ def run(params: Params, topics: dict, pbar: tqdm):
         # making a query for this document:
         doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
                        tokenized_texts=tokenized_texts, window_size=params.window_size)
-        query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+
+        query_terms, weights = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+
+        if params.query_boosting and params.rm == 'bm25':
+            # optional weighing of the terms (does not work with rm3)
+            should = querybuilder.JBooleanClauseOccur['should'].value
+            boolean_query_builder = querybuilder.get_boolean_query_builder()
+
+            terms = [JTermQuery(JTerm("contents", weighted_term[0])) for weighted_term in weights]
+            boosts = [querybuilder.get_boost_query(terms[i], weight[1]) for i, weight in enumerate(weights)]
+
+            for boost in boosts:
+                boolean_query_builder.add(boost, should)
+            query = boolean_query_builder.build()
+        else:
+            query = query_terms
 
         # searching for relevant documents using the SimpleSearcher
         hits = searcher.search(query, k=101)
 
-        # removing the initial document from the retrieved documents and adding the rest to the output list with their score
+        # removing initial document from the retrieved documents and adding the rest to the output list with their score
         return_docs = []
         for i in range(len(hits)):
             if hits[i].docid != document_id:
@@ -115,8 +138,9 @@ def run(params: Params, topics: dict, pbar: tqdm):
 
     # Analyze results and write to result file:
     out_file_name = os.path.join(params.output_dir, params.output_file)
-    os.system(f"RESULTFILE={out_file_name} && echo $RESULTFILE >> {params.output_dir}/all_results.txt")
-    os.system(f"RESULTFILE={out_file_name} && python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt $RESULTFILE | tail -6 >> {params.output_dir}/all_results.txt")
+    os.system(f"echo {out_file_name} >> {params.output_dir}/all_results.txt")
+    os.system(f"python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt "\
+              f"{out_file_name} | tail -5 >> {params.output_dir}/all_results.txt")
 
 
 def generate_params() -> list:

@@ -119,14 +119,14 @@ class Document:
             "kT": kT_ranked
         }
 
-    def get_query(self, params) -> str:
+    def get_query(self, params) -> (str, (str, int)):
         logging.info(f"Getting query for {self.doc_id}...")
         if params.use_tf_idf:
             return self.get_query_tf_idf(params)
 
         query = " ".join(
             [w[0] for w in self.ranking[params.algorithm][:params.query_size]])
-        return query
+        return query, self.ranking[params.algorithm][:params.query_size]
 
     def get_query_tf_idf(self, params) -> str:
         # all of these can be retrieved using the index reader
