@@ -19,17 +19,20 @@ class Params:
     input_file: str = "./background_linking.txt"
     index_loc: str = "./indexes/wapo"
 
-    rm: str = "bm25"        # "bm25" or "rm3"
-    algorithm: str = "kC"   # "kC" or "kT"
-    query_size: int = 100
+    use_tf_idf: bool = False  # Use tf-idf for the initial query
 
-    use_mega_query: bool = True
+    rm: str = "bm25"        # "bm25" or "rm3"
+    algorithm: str = "kT"   # "kC" or "kT"
+    query_size: int = 100
+    window_size: int = 3
+
+    use_mega_query: bool = False
     init_query_size: int = 100
     mega_query_size: int = 100
     n_docs: int = 10
 
     output_dir: str = "./results"
-    output_file: str = f"{rm}_{algorithm}_qsize={query_size}{'_mega' if use_mega_query else ''}.results"
+    output_file: str = f"{rm}_{algorithm}_qsize={query_size}{f'_winsize={window_size}' if not use_tf_idf else ''}{'_mega' if use_mega_query else ''}{'_tf-idf' if use_tf_idf else ''}.results"
 
 
 params = Params()
@@ -84,10 +87,10 @@ for topic_number in tqdm(topics):
 
     # making a query for this document:
     doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
-                   tokenized_texts=tokenized_texts)
+                   tokenized_texts=tokenized_texts, window_size=params.window_size)
     query = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
 
-    # searching for relevant documents using BM25
+    # searching for relevant documents using the SimpleSearcher
     hits = searcher.search(query, k=101)
 
     # removing the initial document from the retrieved documents and adding the rest to the output list with their score

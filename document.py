@@ -3,6 +3,7 @@ from nltk.tokenize import word_tokenize
 from pyserini.index import IndexReader
 from nltk.corpus import stopwords
 import networkx as nx
+import numpy as np
 import itertools
 import logging
 import json
@@ -22,7 +23,7 @@ logging.basicConfig(
 
 
 class Document:
-    def __init__(self, index_reader: IndexReader, simple_searcher: SimpleSearcher, doc_id: str, window_size: int = 2, tokenized_texts: dict = None):
+    def __init__(self, index_reader: IndexReader, simple_searcher: SimpleSearcher, doc_id: str, window_size: int, tokenized_texts: dict = None):
         self.index_reader = index_reader
         self.simple_searcher = simple_searcher
         self.doc_id = doc_id
@@ -120,8 +121,27 @@ class Document:
 
     def get_query(self, params) -> str:
         logging.info(f"Getting query for {self.doc_id}...")
+        if params.use_tf_idf:
+            return self.get_query_tf_idf(params)
+
         query = " ".join(
             [w[0] for w in self.ranking[params.algorithm][:params.query_size]])
+        return query
+
+    def get_query_tf_idf(self, params) -> str:
+        # all of these can be retrieved using the index reader
+        N = self.index_reader.stats()['documents']
+        tf = self.index_reader.get_document_vector(self.doc_id)
+        df = {term: (self.index_reader.get_term_counts(term, analyzer=None))[0] for term in tf.keys()}
+
+        # building the idf from these components
+        # idf = log((1 + N) / number of documents where the term appears)
+        idf = {term: np.log((N + 1) / df[term]) for term in tf.keys()}
+        tf_idf = {term: tf[term] * idf[term] for term in tf.keys()}
+
+        top = np.array(sorted([[idf, term] for term, idf in tf_idf.items()], reverse=True)[:params.init_query_size])
+        query = ' '.join(top[:, 1])
+
         return query
 
     def get_mega_query(self, params) -> str:
