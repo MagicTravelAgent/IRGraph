@@ -5,17 +5,22 @@ Created on Sat Nov 20 11:59:55 2021
 @author: Lucas Puddifoot, Jort Gutter, Damy Hillen
 """
 
+from pyserini.search.querybuilder import JTermQuery, JTerm
 from pyserini.search import SimpleSearcher, querybuilder
 from pyserini.index import IndexReader
 from dataclasses import dataclass
-
-from pyserini.search.querybuilder import JTermQuery, JTerm
-
 from document import Document
 from tqdm import tqdm
 import itertools
+import logging
 import os
 import re
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+file_handler = logging.FileHandler('bm25_test.log')
+file_handler.setFormatter(logging.Formatter('%(levelname)s:%(name)s:%(message)s'))
+logger.addHandler(file_handler)
 
 INPUT_FILE: str = "./background_linking.txt"
 INDEX_LOC: str = "./indexes/wapo"
@@ -46,6 +51,7 @@ class Params:
                 f"{'_boosted' if self.query_boosting else ''}.results"
 
 
+# make the topic dictionary with keys being topic number and value being document id
 def make_topic_dict():
     with open(INPUT_FILE) as f:
         topics = f.readlines()
@@ -69,7 +75,7 @@ def make_topic_dict():
 
 def run(params: Params, topics: dict, pbar: tqdm):
     # =========================== Pipeline ===========================
-    # make the topic dictionary with keys being topic number and value being document id
+    logger.info(f"Running algorithm with parameters: {params}")
 
     # create the searcher for the index
     searcher = SimpleSearcher(INDEX_LOC)
@@ -85,6 +91,7 @@ def run(params: Params, topics: dict, pbar: tqdm):
 
     # open the output file
     if not os.path.isdir(params.output_dir):
+        logger.debug(f"Creating output directory \'{params.output_dir}\'")
         os.mkdir(params.output_dir)
     out_file = open(os.path.join(params.output_dir, params.output_file), "w")
 
@@ -93,28 +100,38 @@ def run(params: Params, topics: dict, pbar: tqdm):
         # getting the document ID for the topic number
         document_id = topics[topic_number]
 
+        logger.info(f"Topic number: {topic_number}, Document: {document_id}")
+
         # making a query for this document:
         doc = Document(simple_searcher=searcher, index_reader=index_reader, doc_id=document_id,
                        tokenized_texts=tokenized_texts, window_size=params.window_size)
 
         query_terms, weights = doc.get_mega_query(params) if params.use_mega_query else doc.get_query(params)
+        logger.debug(f"Query terms and weights: {weights}")
 
-        if params.query_boosting and params.rm == 'bm25':
-            # optional weighing of the terms (does not work with rm3)
-            should = querybuilder.JBooleanClauseOccur['should'].value
-            boolean_query_builder = querybuilder.get_boolean_query_builder()
+        if params.query_boosting:
+            if params.rm == 'bm25':
+                # optional weighing of the terms (does not work with rm3)
+                should = querybuilder.JBooleanClauseOccur['should'].value
+                boolean_query_builder = querybuilder.get_boolean_query_builder()
 
-            terms = [JTermQuery(JTerm("contents", weighted_term[0])) for weighted_term in weights]
-            boosts = [querybuilder.get_boost_query(terms[i], weight[1]) for i, weight in enumerate(weights)]
+                terms = [JTermQuery(JTerm("contents", weighted_term[0])) for weighted_term in weights]
+                boosts = [querybuilder.get_boost_query(terms[i], weight[1]) for i, weight in enumerate(weights)]
 
-            for boost in boosts:
-                boolean_query_builder.add(boost, should)
-            query = boolean_query_builder.build()
+                for boost in boosts:
+                    boolean_query_builder.add(boost, should)
+                query = boolean_query_builder.build()
+            else:
+                logger.warning(f"Retrieval model {params.rm} cannot be used with query boosting!")
+                query = query_terms
         else:
             query = query_terms
 
+        logger.debug(f"Generated query: \'{query}\'")
+
         # searching for relevant documents using the SimpleSearcher
         hits = searcher.search(query, k=101)
+        logger.info(f"{len(hits)} hits!")
 
         # removing initial document from the retrieved documents and adding the rest to the output list with their score
         return_docs = []
@@ -131,6 +148,8 @@ def run(params: Params, topics: dict, pbar: tqdm):
         for item in output:
             out_file.write(' '.join(map(str, item)) + "\n")
 
+        logger.info(f"{len(output)} line(s) written to {out_file.name}")
+
         pbar.update(1)
 
     # closing the output file
@@ -141,6 +160,7 @@ def run(params: Params, topics: dict, pbar: tqdm):
     os.system(f"echo {out_file_name} >> {params.output_dir}/all_results.txt")
     os.system(f"python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt "\
               f"{out_file_name} | tail -5 >> {params.output_dir}/all_results.txt")
+    logger.info(f"Analyzed result written to {params.output_dir}/all_results.txt")
 
 
 def generate_params() -> list:
@@ -170,6 +190,9 @@ def generate_params() -> list:
 def main():
     topics = make_topic_dict()
     params = generate_params()
+
+    logger.info(f"{len(topics)} topic(s) retrieved!")
+    logger.info(f"{len(params)} parameter set(s) generated!")
 
     for i, p in enumerate(params):
         pbar = tqdm(total=len(topics))
