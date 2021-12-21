@@ -32,20 +32,23 @@ class Params:
     use_tf_idf: bool = False  # Use tf-idf for the initial query
 
     rm: str = "bm25"        # "bm25" or "rm3"
-    algorithm: str = "kT"   # "kC" or "kT"
+    algorithm: str = "kT"   # "tfidf", "kC" or "kT"
     query_size: int = 100
     window_size: int = 4
 
-    use_mega_query: bool = True
+    use_mega_query: bool = False
     init_query_size: int = 100
     mega_query_size: int = 100
     n_docs: int = 10
+    multiply_by_tfidf = False
 
-    use_relative_query_size = True
-    rel_q_size = 0.2    # between 0 and 1
-    min_q_size = 70
+    use_relative_query_size: bool = True
+    rel_q_size: float = 0.2    # between 0 and 1
+    min_q_size: int = 70
 
-    query_boosting: bool = True
+    query_boosting: bool = False
+
+    param_string: str = ""  # string of parameters for logging experiments
 
     output_dir: str = "./results"
 
@@ -88,7 +91,7 @@ def filter_hits(hits: list, document_id: str, searcher: SimpleSearcher) -> list:
     seen_docs = set()
     for hit in hits:
         doc = json.loads(searcher.doc(hit.docid).raw())
-        if hit.docid != document_id and (doc['author'], doc['title']) not in seen_docs:
+        if hit.docid != document_id:  # and (doc['author'], doc['title']) not in seen_docs:
             return_docs.append([hit.docid, hit.score])
             seen_docs.add((doc['author'], doc['title']))
     return return_docs
@@ -175,32 +178,34 @@ def run(params: Params, topics: dict, pbar: tqdm):
     out_file.close()
 
     # Analyze results and write to result file:
+    result_file_name = "results"
     out_file_name = os.path.join(params.output_dir, params.output_file)
-    os.system(f"echo {out_file_name} >> {params.output_dir}/all_results.txt")
-    os.system(f"python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.30 ./results/qrels.txt "
-              f"{out_file_name} | tail -5 >> {params.output_dir}/all_results.txt")
-    logger.info(f"Analyzed result written to {params.output_dir}/all_results.txt")
+    os.system(f'echo "{params.param_string}" >> {params.output_dir}/{result_file_name}.txt')
+    os.system(f"python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.100 ./results/qrels.txt "
+              f"{out_file_name} | tail -5 >> {params.output_dir}/{result_file_name}.txt")
+    logger.info(f"Analyzed result written to {params.output_dir}/{result_file_name}.txt")
 
 
 def generate_params() -> list:
     params = [
         ["bm25", "rm3"],
-        ["kC", "kT"],
-        [50],
-        [2, 4, 8],
-        [True]
+        ["kC", "kT", "tfidf"],
+        [4, 8, 12],
+        [0.1, 0.2, 0.3]
     ]
 
     params_list = []
     for p in itertools.product(*params):
-        rm, algorithm, query_size, window_size, use_mega_query = p
-        params_list.append(Params(
-            rm=rm,
-            algorithm=algorithm,
-            query_size=query_size,
-            window_size=window_size,
-            use_mega_query=use_mega_query
-        ))
+        rm, algorithm, window_size,  rel_q_size = p
+        param_string = ';'.join([str(par) for par in p])
+        if not (algorithm == 'tfidf' and window_size != 4):
+            params_list.append(Params(
+                rm=rm,
+                algorithm=algorithm,
+                window_size=window_size,
+                rel_q_size=rel_q_size,
+                param_string=param_string
+            ))
         params_list[-1].set_output()
 
     return params_list

@@ -1,6 +1,7 @@
 from pyserini.search import SimpleSearcher
 from nltk.tokenize import word_tokenize
 from pyserini.index import IndexReader
+from nltk.stem import PorterStemmer
 from nltk.corpus import stopwords
 import networkx as nx
 import numpy as np
@@ -28,12 +29,14 @@ class Document:
         self.doc_id = doc_id
         self.window_size = window_size
         self.tokenized_texts = tokenized_texts
+        self.ps = PorterStemmer()
 
         if self.doc_id not in self.tokenized_texts:
             logger.info(f"Adding document {self.doc_id} to tokenized texts dictionary.")
             self.doc_tokens = self.tokenize_text(self.doc_id)
             self.tokenized_texts[self.doc_id] = self.doc_tokens
 
+        self.tf_idf = self.get_tf_idf()
         self.ranking = self.kCT_from_tokens(self.doc_tokens, window_size=self.window_size)
         logger.debug(f"Calculated kC: {self.ranking['kC']}")
         logger.debug(f"Calculated kT: {self.ranking['kT']}")
@@ -57,12 +60,13 @@ class Document:
         text = self.get_text(doc_id)
         tokens = re.sub("[^a-zA-Z0-9\-]", " ", text.lower())
         tokens = [w for w in word_tokenize(tokens) if w not in stop_words]
-        self.tokenized_texts[doc_id] = tokens
+        stemmed_tokens = [self.ps.stem(token) for token in tokens]
+        self.tokenized_texts[doc_id] = stemmed_tokens
         logger.debug(f"Calculated tokens for document {doc_id}: {tokens}")
-        return tokens
+        return stemmed_tokens
 
     @staticmethod
-    def kCT_from_tokens(tokenized_text: list, window_size: int = 2) -> (list, list):  # TODO: Add logging (using logger object)
+    def kCT_from_tokens(tokenized_text: list, window_size: int = 2) -> (list, list):  # TODO: Add logging (using logger object):
         # Create co-occurrence graph:
         G = nx.Graph()
 
@@ -128,7 +132,7 @@ class Document:
 
     def get_query(self, params) -> (str, list):
         logger.info(f"Getting query for {self.doc_id}...")
-        if params.use_tf_idf:
+        if params.algorithm == 'tfidf':
             logger.info("Using tf-idf for query")
             return self.get_query_tf_idf(params)
 
@@ -136,12 +140,20 @@ class Document:
             if params.use_relative_query_size else params.query_size
 
         logger.info("Using graph algorithm for query")
+        if params.multiply_by_tfidf:
+            logger.info("Weighing and resorting terms by tf-idf")
+            tfidfs = self.tf_idf
+            weighted = [(pair[0], pair[1]*self.tf_idf[pair[0]]) for pair in self.ranking[params.algorithm]]
+            ranking = sorted(weighted, key=lambda item: item[1], reverse=True)
+            old_rank = self.ranking
+        else:
+            ranking = self.ranking[params.algorithm]
 
-        query = " ".join(
-            [w[0] for w in self.ranking[params.algorithm][:query_size]])
-        return query, self.ranking[params.algorithm][:query_size]
+        query = " ".join([w[0] for w in ranking[:query_size]])
 
-    def get_query_tf_idf(self, params) -> str:
+        return query, ranking[:query_size]
+
+    def get_tf_idf(self):
         # all of these can be retrieved using the index reader
         N = self.index_reader.stats()['documents']
         tf = self.index_reader.get_document_vector(self.doc_id)
@@ -151,11 +163,13 @@ class Document:
         # idf = log((1 + N) / number of documents where the term appears)
         idf = {term: np.log((N + 1) / df[term]) for term in tf.keys()}
         tf_idf = {term: tf[term] * idf[term] for term in tf.keys()}
+        return tf_idf
 
-        top = np.array(sorted([[idf, term] for term, idf in tf_idf.items()], reverse=True)[:params.init_query_size])
+    def get_query_tf_idf(self, params) -> (str, list):
+        top = np.array(sorted([[idf, term] for term, idf in self.tf_idf.items()], reverse=True)[:params.init_query_size])
         query = ' '.join(top[:, 1])
 
-        return query
+        return query, [(pair[1], pair[0]) for pair in top]
 
     def get_mega_query(self, params) -> (str, list):
         logger.info(f"Getting mega query for {self.doc_id}...")
