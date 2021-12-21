@@ -88,7 +88,7 @@ def filter_hits(hits: list, document_id: str, searcher: SimpleSearcher) -> list:
     seen_docs = set()
     for hit in hits:
         doc = json.loads(searcher.doc(hit.docid).raw())
-        if hit.docid != document_id and (doc['author'], doc['title']) not in seen_docs:
+        if hit.docid != document_id:  # and (doc['author'], doc['title']) not in seen_docs:
             return_docs.append([hit.docid, hit.score])
             seen_docs.add((doc['author'], doc['title']))
     return return_docs
@@ -184,11 +184,11 @@ def run(params: Params, topics: dict, pbar: tqdm):
 
 def generate_params() -> list:
     params = [
-        ["bm25", "rm3"],
-        ["kC", "kT"],
+        ["rm3"],
+        ["kT"],
         [50],
-        [2, 4, 8],
-        [True]
+        [8],
+        [False]
     ]
 
     params_list = []
