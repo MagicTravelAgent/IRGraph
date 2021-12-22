@@ -60,10 +60,8 @@ class Document:
         text = self.get_text(doc_id)
         tokens = re.sub("[^a-zA-Z0-9\-]", " ", text.lower())
         tokens = [w for w in word_tokenize(tokens) if w not in stop_words]
-        stemmed_tokens = [self.ps.stem(token) for token in tokens]
-        self.tokenized_texts[doc_id] = stemmed_tokens
-        logger.debug(f"Calculated tokens for document {doc_id}: {tokens}")
-        return stemmed_tokens
+        self.tokenized_texts[doc_id] = tokens
+        return tokens
 
     @staticmethod
     def kCT_from_tokens(tokenized_text: list, window_size: int = 2) -> (list, list):  # TODO: Add logging (using logger object):
@@ -132,12 +130,13 @@ class Document:
 
     def get_query(self, params) -> (str, list):
         logger.info(f"Getting query for {self.doc_id}...")
+
+        query_size = max(70, int(params.rel_q_size * len(self.ranking['kC']))) \
+            if params.use_relative_query_size else params.query_size
+
         if params.algorithm == 'tfidf':
             logger.info("Using tf-idf for query")
-            return self.get_query_tf_idf(params)
-
-        query_size = max(70, int(params.rel_q_size*len(self.ranking[params.algorithm])))\
-            if params.use_relative_query_size else params.query_size
+            return self.get_query_tf_idf(params, query_size)
 
         logger.info("Using graph algorithm for query")
         if params.multiply_by_tfidf:
@@ -165,11 +164,11 @@ class Document:
         tf_idf = {term: tf[term] * idf[term] for term in tf.keys()}
         return tf_idf
 
-    def get_query_tf_idf(self, params) -> (str, list):
+    def get_query_tf_idf(self, params, query_size) -> (str, list):
         top = np.array(sorted([[idf, term] for term, idf in self.tf_idf.items()], reverse=True)[:params.init_query_size])
         query = ' '.join(top[:, 1])
 
-        return query, [(pair[1], pair[0]) for pair in top]
+        return query[:query_size], [(pair[1], pair[0]) for pair in top][:query_size]
 
     def get_mega_query(self, params) -> (str, list):
         logger.info(f"Getting mega query for {self.doc_id}...")

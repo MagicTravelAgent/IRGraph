@@ -191,7 +191,7 @@ def generate_params() -> list:
         ["bm25", "rm3"],
         ["kC", "kT", "tfidf"],
         [4, 8, 12],
-        [0.1, 0.2, 0.3]
+        [0.1, 0.2, 0.3, 1.0]
     ]
 
     params_list = []
