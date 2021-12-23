@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
+from scipy import stats
 import numpy as np
 import os
+import re
 
 possible_parameters = {
     'retrieval_model': ['bm25', 'rm3'],
@@ -112,9 +114,50 @@ def plot_results(results):
     plot_values(measure='ndcg_5', horizontal='relative_query_size', vertical='window_size', results=results)
 
 
+def print_table(results):
+    f = open('latex_tables', 'w')
+    numbers = np.zeros(())
+    for rm_i in range(2):
+
+        f.write()
+    f.close()
+
+def parse_ttest_data():
+    data = {}
+    f = open('./results/results_ttest.txt', 'r')
+    for test in f.read().split('\n\n'):
+        if test != "":
+            descr_data = test.split('Results:\n')
+            params = descr_data[0].split('\n')[0]
+            parsed_result = {
+                'ndcg_cut_5': [],
+                'map': [],
+                'recall_100': [],
+                'P_30': []
+            }
+            data_lines = [re.split('\t+|\\s+', line) for line in descr_data[1].split('\n')]
+            for d_line in data_lines:
+                parsed_result[d_line[0]].append(float(d_line[2]))
+            data[params] = parsed_result
+    f.close()
+
+    return data
+
+def perform_t_test():
+    data = parse_ttest_data()
+    mean = 0.5231
+    arr = [0.6,0.8,0.45,0.58,0.9]
+    for key, value in data.items():
+        array = value['ndcg_cut_5']
+        ttest = stats.ttest_1samp(array, mean, alternative='greater')
+        data[key]['ttest'] = ttest
+        print(f'ttest result for {key}: {ttest}, mean: {np.mean(array)}')
+
+
 def run():
-    results = parse_results()
-    plot_results(results)
+    perform_t_test()
+    #results = parse_results()
+    #plot_results(results)
 
 
 if __name__ == "__main__":

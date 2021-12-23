@@ -178,11 +178,13 @@ def run(params: Params, topics: dict, pbar: tqdm):
     out_file.close()
 
     # Analyze results and write to result file:
-    result_file_name = "results"
+    result_file_name = "results_ttest"
     out_file_name = os.path.join(params.output_dir, params.output_file)
     os.system(f'echo "{params.param_string}" >> {params.output_dir}/{result_file_name}.txt')
-    os.system(f"python3 -m pyserini.eval.trec_eval -m map -m P.30 -m ndcg_cut.5 -m recall.100 ./results/qrels.txt "
-              f"{out_file_name} | tail -5 >> {params.output_dir}/{result_file_name}.txt")
+    os.system(f"python3 -m pyserini.eval.trec_eval -q -m map -m P.30 -m ndcg_cut.5 -m recall.100 ./results/qrels.txt "
+              f"{out_file_name} >> {params.output_dir}/{result_file_name}.txt")
+    #os.system(f"python3 -m pyserini.eval.trec_eval -c -m map -m P.30 -m ndcg_cut.5 -m recall.100 ./results/qrels.txt "
+    #          f"{out_file_name} | tail -5 >> {params.output_dir}/{result_file_name}.txt")
     logger.info(f"Analyzed result written to {params.output_dir}/{result_file_name}.txt")
 
 
